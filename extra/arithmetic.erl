@@ -1,99 +1,127 @@
 -module(arithmetic).
 -export([parse/1,file/1]).
--compile(nowarn_unused_vars).
--compile({nowarn_unused_function,[p/4, p/5, p_eof/0, p_optional/1, p_not/1, p_assert/1, p_seq/1, p_and/1, p_choose/1, p_zero_or_more/1, p_one_or_more/1, p_label/2, p_string/1, p_anything/0, p_charclass/1, line/1, column/1]}).
+-define(p_charclass,true).
+-define(p_choose,true).
+-define(p_label,true).
+-define(p_one_or_more,true).
+-define(p_scan,true).
+-define(p_seq,true).
+-define(p_string,true).
 
 
 
-file(Filename) -> {ok, Bin} = file:read_file(Filename), parse(binary_to_list(Bin)).
+-spec file(file:name()) -> any().
+file(Filename) -> case file:read_file(Filename) of {ok,Bin} -> parse(Bin); Err -> Err end.
 
-parse(Input) ->
-  setup_memo(),
+-spec parse(binary() | list()) -> any().
+parse(List) when is_list(List) -> parse(unicode:characters_to_binary(List));
+parse(Input) when is_binary(Input) ->
+  _ = setup_memo(),
   Result = case 'additive'(Input,{{line,1},{column,1}}) of
-             {AST, [], _Index} -> AST;
+             {AST, <<>>, _Index} -> AST;
              Any -> Any
            end,
   release_memo(), Result.
 
+-spec 'additive'(input(), index()) -> parse_result().
 'additive'(Input, Index) ->
-  p(Input, Index, 'additive', fun(I,D) -> (p_choose([p_seq([fun 'multitive'/2, p_string("+"), fun 'additive'/2]), fun 'multitive'/2]))(I,D) end, fun(Node, Idx) -> 
+  p(Input, Index, 'additive', fun(I,D) -> (p_choose([p_seq([fun 'multitive'/2, p_string(<<"+">>), fun 'additive'/2]), fun 'multitive'/2]))(I,D) end, fun(Node, _Idx) ->
 case Node of
   Int when is_integer(Int) -> Int;
   [A, "+", B] -> A + B
 end
  end).
 
+-spec 'multitive'(input(), index()) -> parse_result().
 'multitive'(Input, Index) ->
-  p(Input, Index, 'multitive', fun(I,D) -> (p_choose([p_seq([fun 'primary'/2, p_string("*"), fun 'multitive'/2]), fun 'primary'/2]))(I,D) end, fun(Node, Idx) -> 
+  p(Input, Index, 'multitive', fun(I,D) -> (p_choose([p_seq([fun 'primary'/2, p_string(<<"*">>), p_label('Mul', fun 'multitive'/2)]), fun 'primary'/2]))(I,D) end, fun(Node, _Idx) ->
 case Node of
   Int when is_integer(Int) -> Int;
-  [A,"*",B] -> A * B
+  [A,"*",{'Mul',B}] -> A * B
 end
  end).
 
+-spec 'primary'(input(), index()) -> parse_result().
 'primary'(Input, Index) ->
-  p(Input, Index, 'primary', fun(I,D) -> (p_choose([p_seq([p_string("("), fun 'additive'/2, p_string(")")]), fun 'decimal'/2]))(I,D) end, fun(Node, Idx) -> 
+  p(Input, Index, 'primary', fun(I,D) -> (p_choose([p_label('par', p_seq([p_string(<<"(">>), p_label('add', fun 'additive'/2), p_string(<<")">>)])), p_label('dec', fun 'Decimal'/2)]))(I,D) end, fun(Node, _Idx) ->
 case Node of
-  Int when is_integer(Int) -> Int;
-  List when is_list(List) -> lists:nth(2,List)
+  {dec,Int} when is_integer(Int) -> Int;
+  {par,List} -> proplists:get_value(add,List)
 end
  end).
 
-'decimal'(Input, Index) ->
-  p(Input, Index, 'decimal', fun(I,D) -> (p_one_or_more(p_charclass("[0-9]")))(I,D) end, fun(Node, Idx) -> list_to_integer(Node) end).
+-spec 'Decimal'(input(), index()) -> parse_result().
+'Decimal'(Input, Index) ->
+  p(Input, Index, 'Decimal', fun(I,D) -> (p_one_or_more(p_charclass(<<"[0-9]">>)))(I,D) end, fun(Node, _Idx) ->list_to_integer(Node) end).
 
 
 
+-file("peg_includes.hrl", 1).
+-type index() :: {{line, pos_integer()}, {column, pos_integer()}}.
+-type input() :: binary().
+-type parse_failure() :: {fail, term()}.
+-type parse_success() :: {term(), input(), index()}.
+-type parse_result() :: parse_failure() | parse_success().
+-type parse_fun() :: fun((input(), index()) -> parse_result()).
+-type xform_fun() :: fun((input(), index()) -> term()).
 
-
-
-p(Inp, Index, Name, ParseFun) ->
-  p(Inp, Index, Name, ParseFun, fun(N, _Idx) -> N end).
-
+-spec p(input(), index(), atom(), parse_fun(), xform_fun()) -> parse_result().
 p(Inp, StartIndex, Name, ParseFun, TransformFun) ->
-  % Grab the memo table from ets
-  Memo = get_memo(StartIndex),
-  % See if the current reduction is memoized
-  case dict:find(Name, Memo) of
-    % If it is, return the result
-    {ok, Result} -> Result;
-    % If not, attempt to parse
-    _ ->
-      case ParseFun(Inp, StartIndex) of
-        % If it fails, memoize the failure
-        {fail,_} = Failure ->
-          memoize(StartIndex, dict:store(Name, Failure, Memo)),
+  case get_memo(StartIndex, Name) of      % See if the current reduction is memoized
+    {ok, Memo} -> %Memo;                     % If it is, return the stored result
+      Memo;
+    _ ->                                        % If not, attempt to parse
+      Result = case ParseFun(Inp, StartIndex) of
+        {fail,_} = Failure ->                       % If it fails, memoize the failure
           Failure;
-        % If it passes, transform and memoize the result.
-        {Result, InpRem, NewIndex} ->
-          Transformed = TransformFun(Result, StartIndex),
-          memoize(StartIndex, dict:store(Name, {Transformed, InpRem, NewIndex}, Memo)),
+        {Match, InpRem, NewIndex} ->               % If it passes, transform and memoize the result.
+          Transformed = TransformFun(Match, StartIndex),
           {Transformed, InpRem, NewIndex}
-      end
+      end,
+      memoize(StartIndex, Name, Result),
+      Result
   end.
 
+-spec setup_memo() -> ets:tid().
 setup_memo() ->
-  put(parse_memo_table, ets:new(?MODULE, [set])).
+  put({parse_memo_table, ?MODULE}, ets:new(?MODULE, [set])).
 
+-spec release_memo() -> true.
 release_memo() ->
   ets:delete(memo_table_name()).
 
-memoize(Position, Struct) ->
-  ets:insert(memo_table_name(), {Position, Struct}).
+-spec memoize(index(), atom(), parse_result()) -> true.
+memoize(Index, Name, Result) ->
+  Memo = case ets:lookup(memo_table_name(), Index) of
+              [] -> [];
+              [{Index, Plist}] -> Plist
+         end,
+  ets:insert(memo_table_name(), {Index, [{Name, Result}|Memo]}).
 
-get_memo(Position) ->
-  case ets:lookup(memo_table_name(), Position) of
-    [] -> dict:new();
-    [{Position, Dict}] -> Dict
-  end.
+-spec get_memo(index(), atom()) -> {ok, term()} | {error, not_found}.
+get_memo(Index, Name) ->
+  case ets:lookup(memo_table_name(), Index) of
+    [] -> {error, not_found};
+    [{Index, Plist}] ->
+      case proplists:lookup(Name, Plist) of
+        {Name, Result}  -> {ok, Result};
+        _  -> {error, not_found}
+      end
+    end.
 
+-spec memo_table_name() -> ets:tid().
 memo_table_name() ->
-    get(parse_memo_table).
+    get({parse_memo_table, ?MODULE}).
 
+-ifdef(p_eof).
+-spec p_eof() -> parse_fun().
 p_eof() ->
-  fun([], Index) -> {eof, [], Index};
+  fun(<<>>, Index) -> {eof, [], Index};
      (_, Index) -> {fail, {expected, eof, Index}} end.
+-endif.
 
+-ifdef(p_optional).
+-spec p_optional(parse_fun()) -> parse_fun().
 p_optional(P) ->
   fun(Input, Index) ->
       case P(Input, Index) of
@@ -101,7 +129,10 @@ p_optional(P) ->
         {_, _, _} = Success -> Success
       end
   end.
+-endif.
 
+-ifdef(p_not).
+-spec p_not(parse_fun()) -> parse_fun().
 p_not(P) ->
   fun(Input, Index)->
       case P(Input,Index) of
@@ -110,7 +141,10 @@ p_not(P) ->
         {Result, _, _} -> {fail, {expected, {no_match, Result},Index}}
       end
   end.
+-endif.
 
+-ifdef(p_assert).
+-spec p_assert(parse_fun()) -> parse_fun().
 p_assert(P) ->
   fun(Input,Index) ->
       case P(Input,Index) of
@@ -118,27 +152,32 @@ p_assert(P) ->
         _ -> {[], Input, Index}
       end
   end.
+-endif.
 
-p_and(P) ->
-  p_seq(P).
-
+-ifdef(p_seq).
+-spec p_seq([parse_fun()]) -> parse_fun().
 p_seq(P) ->
   fun(Input, Index) ->
       p_all(P, Input, Index, [])
   end.
 
+-spec p_all([parse_fun()], input(), index(), [term()]) -> parse_result().
 p_all([], Inp, Index, Accum ) -> {lists:reverse( Accum ), Inp, Index};
 p_all([P|Parsers], Inp, Index, Accum) ->
   case P(Inp, Index) of
     {fail, _} = Failure -> Failure;
     {Result, InpRem, NewIndex} -> p_all(Parsers, InpRem, NewIndex, [Result|Accum])
   end.
+-endif.
 
+-ifdef(p_choose).
+-spec p_choose([parse_fun()]) -> parse_fun().
 p_choose(Parsers) ->
   fun(Input, Index) ->
       p_attempt(Parsers, Input, Index, none)
   end.
 
+-spec p_attempt([parse_fun()], input(), index(), none | parse_failure()) -> parse_result().
 p_attempt([], _Input, _Index, Failure) -> Failure;
 p_attempt([P|Parsers], Input, Index, FirstFailure)->
   case P(Input, Index) of
@@ -149,12 +188,18 @@ p_attempt([P|Parsers], Input, Index, FirstFailure)->
       end;
     Result -> Result
   end.
+-endif.
 
+-ifdef(p_zero_or_more).
+-spec p_zero_or_more(parse_fun()) -> parse_fun().
 p_zero_or_more(P) ->
   fun(Input, Index) ->
       p_scan(P, Input, Index, [])
   end.
+-endif.
 
+-ifdef(p_one_or_more).
+-spec p_one_or_more(parse_fun()) -> parse_fun().
 p_one_or_more(P) ->
   fun(Input, Index)->
       Result = p_scan(P, Input, Index, []),
@@ -166,7 +211,10 @@ p_one_or_more(P) ->
           {fail, {expected, {at_least_one, Failure}, Index}}
       end
   end.
+-endif.
 
+-ifdef(p_label).
+-spec p_label(atom(), parse_fun()) -> parse_fun().
 p_label(Tag, P) ->
   fun(Input, Index) ->
       case P(Input, Index) of
@@ -176,45 +224,85 @@ p_label(Tag, P) ->
           {{Tag, Result}, InpRem, NewIndex}
       end
   end.
+-endif.
 
-p_scan(_, [], Index, Accum) -> {lists:reverse( Accum ), [], Index};
+-ifdef(p_scan).
+-spec p_scan(parse_fun(), input(), index(), [term()]) -> {[term()], input(), index()}.
+p_scan(_, <<>>, Index, Accum) -> {lists:reverse(Accum), <<>>, Index};
 p_scan(P, Inp, Index, Accum) ->
   case P(Inp, Index) of
     {fail,_} -> {lists:reverse(Accum), Inp, Index};
     {Result, InpRem, NewIndex} -> p_scan(P, InpRem, NewIndex, [Result | Accum])
   end.
+-endif.
 
+-ifdef(p_string).
+-spec p_string(binary()) -> parse_fun().
 p_string(S) ->
-  fun(Input, Index) ->
-      case lists:prefix(S, Input) of
-        true -> {S, lists:sublist(Input, length(S)+1, length(Input)), p_advance_index(S,Index)};
-        _ -> {fail, {expected, {string, S}, Index}}
+    Length = erlang:byte_size(S),
+    fun(Input, Index) ->
+      try
+          <<S:Length/binary, Rest/binary>> = Input,
+          {S, Rest, p_advance_index(S, Index)}
+      catch
+          error:{badmatch,_} -> {fail, {expected, {string, S}, Index}}
       end
-  end.
+    end.
+-endif.
 
+-ifdef(p_anything).
+-spec p_anything() -> parse_fun().
 p_anything() ->
-  fun([], Index) -> {fail, {expected, any_character, Index}};
-     ([H|T], Index) -> {H, T, p_advance_index(H, Index)}
+  fun(<<>>, Index) -> {fail, {expected, any_character, Index}};
+     (Input, Index) when is_binary(Input) ->
+          <<C/utf8, Rest/binary>> = Input,
+          {<<C/utf8>>, Rest, p_advance_index(<<C/utf8>>, Index)}
   end.
+-endif.
 
+-ifdef(p_charclass).
+-spec p_charclass(string() | binary()) -> parse_fun().
 p_charclass(Class) ->
-  fun(Inp, Index) ->
-     {ok, RE} = re:compile("^"++Class, [unicode]),
-      case re:run(Inp, RE) of
-        {match, _} ->
-          {hd(Inp), tl(Inp), p_advance_index(hd(Inp), Index)};
-        _ -> {fail,{expected, {character_class, Class}, Index}}
-      end
-  end.
+    {ok, RE} = re:compile(Class, [unicode, dotall]),
+    fun(Inp, Index) ->
+            case re:run(Inp, RE, [anchored]) of
+                {match, [{0, Length}|_]} ->
+                    {Head, Tail} = erlang:split_binary(Inp, Length),
+                    {Head, Tail, p_advance_index(Head, Index)};
+                _ -> {fail, {expected, {character_class, binary_to_list(Class)}, Index}}
+            end
+    end.
+-endif.
 
+-ifdef(p_regexp).
+-spec p_regexp(binary()) -> parse_fun().
+p_regexp(Regexp) ->
+    {ok, RE} = re:compile(Regexp, [unicode, dotall, anchored]),
+    fun(Inp, Index) ->
+        case re:run(Inp, RE) of
+            {match, [{0, Length}|_]} ->
+                {Head, Tail} = erlang:split_binary(Inp, Length),
+                {Head, Tail, p_advance_index(Head, Index)};
+            _ -> {fail, {expected, {regexp, binary_to_list(Regexp)}, Index}}
+        end
+    end.
+-endif.
+
+-ifdef(line).
+-spec line(index() | term()) -> pos_integer() | undefined.
 line({{line,L},_}) -> L;
 line(_) -> undefined.
+-endif.
 
+-ifdef(column).
+-spec column(index() | term()) -> pos_integer() | undefined.
 column({_,{column,C}}) -> C;
 column(_) -> undefined.
+-endif.
 
-p_advance_index(MatchedInput, Index) when is_list(MatchedInput) -> % strings
-  lists:foldl(fun p_advance_index/2, Index, MatchedInput);
+-spec p_advance_index(input() | unicode:charlist() | pos_integer(), index()) -> index().
+p_advance_index(MatchedInput, Index) when is_list(MatchedInput) orelse is_binary(MatchedInput)-> % strings
+  lists:foldl(fun p_advance_index/2, Index, unicode:characters_to_list(MatchedInput));
 p_advance_index(MatchedInput, Index) when is_integer(MatchedInput) -> % single characters
   {{line, Line}, {column, Col}} = Index,
   case MatchedInput of
