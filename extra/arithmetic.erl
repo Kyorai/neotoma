@@ -199,7 +199,7 @@ p_anything() ->
 
 p_charclass(Class) ->
   fun(Inp, Index) ->
-     {ok, RE} = re:compile("^"++Class),
+     {ok, RE} = re:compile("^"++Class, [unicode]),
       case re:run(Inp, RE) of
         {match, _} ->
           {hd(Inp), tl(Inp), p_advance_index(hd(Inp), Index)};

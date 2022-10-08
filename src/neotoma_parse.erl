@@ -305,7 +305,7 @@ end
 	% Escape \ and " as they are used in erlang string. Other sumbol stay as is.
 	%  \ -> \\
 	%  " -> \"
-   re:replace(proplists:get_value(string, Node), "\"|\\\\", "\\\\&", [{return, binary}, global]),
+   re:replace(proplists:get_value(string, Node), "\"|\\\\", "\\\\&", [{return, binary}, global, unicode]),
    "\">>)"]
  end).
 
