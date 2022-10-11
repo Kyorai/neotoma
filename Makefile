@@ -21,7 +21,7 @@ xref: compile
 	rebar3 xref skip_deps=true
 
 bootstrap: compile
-	erl -pz ebin -b start_sasl -noshell -s init stop -s neotoma bootstrap
+	erl -pz $(CURDIR)/_build/default/lib/neotoma/ebin -b no_dot_erlang -noinput -s neotoma make_bootstrap
 	rebar3 compile
 
 escript:

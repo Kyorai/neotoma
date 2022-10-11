@@ -1,6 +1,6 @@
 -module(neotoma).
 -author("Sean Cribbs <seancribbs@gmail.com>").
--export([file/1, file/2, bootstrap/0]).
+-export([file/1, file/2, bootstrap/0, make_bootstrap/0]).
 -export([main/1]).
 
 -define(ALL_COMBINATORS, [p_eof, p_optional, p_not, p_assert, p_seq,
@@ -84,8 +84,8 @@ generate_entry_functions(Root) ->
      ["-spec file(file:name()) -> any().\n",
      "file(Filename) ->\n",
      "  AbsFilename = filename:absname(Filename),\n",
-     "  case erl_prim_loader:get_file(AbsFilename) of \n",
-     "    {ok, Bin} -> parse(Bin);\n",
+     "  case erl_prim_loader:get_file(AbsFilename) of\n",
+     "    {ok, Bin, _FullName} -> parse(Bin);\n",
      "    Err -> Err\n",
      "  end.\n\n",
      "-spec parse(binary() | list()) -> any().\n",
@@ -141,6 +141,13 @@ generate_transform_stub(XfFile,ModName) ->
 -spec bootstrap() -> 'ok'.
 bootstrap() ->
     file("priv/neotoma_parse.peg", [{output, "src/"}, {neotoma_priv_dir, "priv"}]).
+
+%% @doc Bootstraps the neotoma metagrammar, then exits.
+%% @equiv file("src/neotoma_parse.peg")
+-spec make_bootstrap() -> 'ok'.
+make_bootstrap() ->
+    ok = bootstrap(),
+    ok = init:stop().
 
 %% @doc Parses arguments passed to escript
 -spec parse_options(list()) -> list().

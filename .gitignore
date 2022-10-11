@@ -1,3 +1,4 @@
+erl_crash.dump
 test_parser.*
 ebin/*.beam
 ebin/neotoma.app
