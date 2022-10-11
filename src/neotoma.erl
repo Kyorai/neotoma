@@ -82,16 +82,25 @@ generate_combinator_macro(C) ->
 generate_entry_functions(Root) ->
     {RootRule,_} = Root,
      ["-spec file(file:name()) -> any().\n",
-     "file(Filename) -> case file:read_file(Filename) of {ok,Bin} -> parse(Bin); Err -> Err end.\n\n",
+     "file(Filename) ->\n",
+     "  AbsFilename = filename:absname(Filename),\n",
+     "  case erl_prim_loader:get_file(AbsFilename) of \n",
+     "    {ok, Bin} -> parse(Bin);\n",
+     "    Err -> Err\n",
+     "  end.\n\n",
      "-spec parse(binary() | list()) -> any().\n",
-     "parse(List) when is_list(List) -> parse(unicode:characters_to_binary(List));\n",
+     "parse(List) when is_list(List) ->\n",
+     "  parse(unicode:characters_to_binary(List));\n",
      "parse(Input) when is_binary(Input) ->\n",
      "  _ = setup_memo(),\n",
      "  Result = case '",RootRule,"'(Input,{{line,1},{column,1}}) of\n",
      "             {AST, <<>>, _Index} -> AST;\n",
      "             Any -> Any\n"
      "           end,\n",
-     "  release_memo(), Result.\n"].
+     "  release_memo(),\n",
+     "  Result;\n",
+     "parse(Error) ->\n",
+     "  Error.\n\n"].
 
 -spec parse_grammar(file:filename()) -> any().
 parse_grammar(InputFile) ->

@@ -11,17 +11,27 @@
 
 
 -spec file(file:name()) -> any().
-file(Filename) -> case file:read_file(Filename) of {ok,Bin} -> parse(Bin); Err -> Err end.
+file(Filename) ->
+  AbsFilename = filename:absname(Filename),
+  case erl_prim_loader:get_file(AbsFilename) of 
+    {ok, Bin} -> parse(Bin);
+    Err -> Err
+  end.
 
 -spec parse(binary() | list()) -> any().
-parse(List) when is_list(List) -> parse(unicode:characters_to_binary(List));
+parse(List) when is_list(List) ->
+  parse(unicode:characters_to_binary(List));
 parse(Input) when is_binary(Input) ->
   _ = setup_memo(),
   Result = case 'additive'(Input,{{line,1},{column,1}}) of
              {AST, <<>>, _Index} -> AST;
              Any -> Any
            end,
-  release_memo(), Result.
+  release_memo(),
+  Result;
+parse(Error) ->
+  Error.
+
 
 -spec 'additive'(input(), index()) -> parse_result().
 'additive'(Input, Index) ->
