@@ -97,7 +97,7 @@ used_combinator(C) ->
 
 -spec used_transform_variables(binary()) -> [ 'Node' | 'Idx' ].
 used_transform_variables(Transform) ->
-  Code = unicode:characters_to_list(Transform),
+  Code = neotoma_unicode:characters_to_list(Transform),
   {ok, Tokens, _} = erl_scan:string(Code),
   used_transform_variables(Tokens, []).
 
@@ -113,23 +113,33 @@ used_transform_variables([], Acc) ->
   lists:usort(Acc).
 
 -spec file(file:name()) -> any().
-file(Filename) -> case file:read_file(Filename) of {ok,Bin} -> parse(Bin); Err -> Err end.
+file(Filename) ->
+  AbsFilename = filename:absname(Filename),
+  case erl_prim_loader:get_file(AbsFilename) of
+    {ok, Bin, _FullName} -> parse(Bin);
+    Err -> Err
+  end.
 
 -spec parse(binary() | list()) -> any().
-parse(List) when is_list(List) -> parse(unicode:characters_to_binary(List));
+parse(List) when is_list(List) ->
+  parse(unicode:characters_to_binary(List));
 parse(Input) when is_binary(Input) ->
   _ = setup_memo(),
   Result = case 'rules'(Input,{{line,1},{column,1}}) of
              {AST, <<>>, _Index} -> AST;
              Any -> Any
            end,
-  release_memo(), Result.
+  release_memo(),
+  Result;
+parse(Error) ->
+  Error.
+
 
 -spec 'rules'(input(), index()) -> parse_result().
 'rules'(Input, Index) ->
   p(Input, Index, 'rules', fun(I,D) -> (p_seq([p_optional(fun 'space'/2), fun 'declaration_sequence'/2, p_optional(fun 'space'/2), p_optional(fun 'code_block'/2), p_optional(fun 'space'/2)]))(I,D) end, fun(Node, _Idx) ->
   RootRule = verify_rules(),
-  Rules = unicode:characters_to_binary(lists:map(fun(R) -> [R, "\n\n"] end, lists:nth(2, Node))),
+  Rules = neotoma_unicode:characters_to_binary(lists:map(fun(R) -> [R, "\n\n"] end, lists:nth(2, Node))),
   Code = case lists:nth(4, Node) of
              {code, Block} -> Block;
              _ -> []
@@ -288,7 +298,7 @@ end
 -spec 'nonterminal'(input(), index()) -> parse_result().
 'nonterminal'(Input, Index) ->
   p(Input, Index, 'nonterminal', fun(I,D) -> (p_seq([fun 'alpha_char'/2, p_zero_or_more(fun 'alphanumeric_char'/2)]))(I,D) end, fun(Node, Idx) ->
-  Symbol = unicode:characters_to_binary(Node),
+  Symbol = neotoma_unicode:characters_to_binary(Node),
   add_nt(Symbol, Idx),
   {nonterminal, Symbol}
  end).
@@ -305,7 +315,7 @@ end
 	% Escape \ and " as they are used in erlang string. Other sumbol stay as is.
 	%  \ -> \\
 	%  " -> \"
-   re:replace(proplists:get_value(string, Node), "\"|\\\\", "\\\\&", [{return, binary}, global]),
+   re:replace(proplists:get_value(string, Node), "\"|\\\\", "\\\\&", [{return, binary}, global, unicode]),
    "\">>)"]
  end).
 
@@ -314,7 +324,7 @@ end
   p(Input, Index, 'quoted_string', fun(I,D) -> (p_choose([fun 'single_quoted_string'/2, fun 'double_quoted_string'/2]))(I,D) end, fun(Node, _Idx) ->
   used_combinator(p_string),
   lists:flatten(["p_string(<<\"",
-   escape_string(unicode:characters_to_list(proplists:get_value(string, Node))),
+   escape_string(neotoma_unicode:characters_to_list(proplists:get_value(string, Node))),
    "\">>)"])
  end).
 
@@ -331,7 +341,7 @@ end
   p(Input, Index, 'character_class', fun(I,D) -> (p_seq([p_string(<<"[">>), p_label('characters', p_one_or_more(p_seq([p_not(p_string(<<"]">>)), p_choose([p_seq([p_string(<<"\\\\">>), p_anything()]), p_seq([p_not(p_string(<<"\\\\">>)), p_anything()])])]))), p_string(<<"]">>)]))(I,D) end, fun(Node, _Idx) ->
   used_combinator(p_charclass),
   ["p_charclass(<<\"[",
-   escape_string(unicode:characters_to_list(proplists:get_value(characters, Node))),
+   escape_string(neotoma_unicode:characters_to_list(proplists:get_value(characters, Node))),
    "]\">>)"]
  end).
 

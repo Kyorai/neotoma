@@ -1,6 +1,6 @@
 -module(neotoma).
 -author("Sean Cribbs <seancribbs@gmail.com>").
--export([file/1, file/2, bootstrap/0]).
+-export([file/1, file/2, bootstrap/0, make_bootstrap/0, make_extra/0]).
 -export([main/1]).
 
 -define(ALL_COMBINATORS, [p_eof, p_optional, p_not, p_assert, p_seq,
@@ -82,16 +82,25 @@ generate_combinator_macro(C) ->
 generate_entry_functions(Root) ->
     {RootRule,_} = Root,
      ["-spec file(file:name()) -> any().\n",
-     "file(Filename) -> case file:read_file(Filename) of {ok,Bin} -> parse(Bin); Err -> Err end.\n\n",
+     "file(Filename) ->\n",
+     "  AbsFilename = filename:absname(Filename),\n",
+     "  case erl_prim_loader:get_file(AbsFilename) of\n",
+     "    {ok, Bin, _FullName} -> parse(Bin);\n",
+     "    Err -> Err\n",
+     "  end.\n\n",
      "-spec parse(binary() | list()) -> any().\n",
-     "parse(List) when is_list(List) -> parse(unicode:characters_to_binary(List));\n",
+     "parse(List) when is_list(List) ->\n",
+     "  parse(unicode:characters_to_binary(List));\n",
      "parse(Input) when is_binary(Input) ->\n",
      "  _ = setup_memo(),\n",
      "  Result = case '",RootRule,"'(Input,{{line,1},{column,1}}) of\n",
      "             {AST, <<>>, _Index} -> AST;\n",
      "             Any -> Any\n"
      "           end,\n",
-     "  release_memo(), Result.\n"].
+     "  release_memo(),\n",
+     "  Result;\n",
+     "parse(Error) ->\n",
+     "  Error.\n\n"].
 
 -spec parse_grammar(file:filename()) -> any().
 parse_grammar(InputFile) ->
@@ -132,6 +141,21 @@ generate_transform_stub(XfFile,ModName) ->
 -spec bootstrap() -> 'ok'.
 bootstrap() ->
     file("priv/neotoma_parse.peg", [{output, "src/"}, {neotoma_priv_dir, "priv"}]).
+
+%% @doc Bootstraps the neotoma metagrammar, then exits.
+%% @equiv file("src/neotoma_parse.peg")
+-spec make_bootstrap() -> 'ok'.
+make_bootstrap() ->
+    ok = bootstrap(),
+    ok = init:stop().
+
+%% @doc Makes the neotoma extras, then exits.
+-spec make_extra() -> 'ok'.
+make_extra() ->
+    ok = file("extra/arithmetic.peg"),
+    ok = file("extra/csv.peg"),
+    ok = file("extra/json.peg"),
+    ok = init:stop().
 
 %% @doc Parses arguments passed to escript
 -spec parse_options(list()) -> list().
