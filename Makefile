@@ -1,4 +1,4 @@
-.PHONY: test compile clean dialyzer bootstrap escript
+.PHONY: bootstrap compile clean dialyzer escript extra test
 
 all: compile
 
@@ -23,6 +23,9 @@ xref: compile
 bootstrap: compile
 	erl -pz $(CURDIR)/_build/default/lib/neotoma/ebin -b no_dot_erlang -noinput -s neotoma make_bootstrap
 	rebar3 compile
+
+extra: compile
+	erl -pz $(CURDIR)/_build/default/lib/neotoma/ebin -b no_dot_erlang -noinput -s neotoma make_extra
 
 escript:
 	rebar3 escriptize

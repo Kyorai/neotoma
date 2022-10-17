@@ -13,8 +13,8 @@
 -spec file(file:name()) -> any().
 file(Filename) ->
   AbsFilename = filename:absname(Filename),
-  case erl_prim_loader:get_file(AbsFilename) of 
-    {ok, Bin} -> parse(Bin);
+  case erl_prim_loader:get_file(AbsFilename) of
+    {ok, Bin, _FullName} -> parse(Bin);
     Err -> Err
   end.
 

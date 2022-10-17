@@ -1,6 +1,6 @@
 -module(neotoma).
 -author("Sean Cribbs <seancribbs@gmail.com>").
--export([file/1, file/2, bootstrap/0, make_bootstrap/0]).
+-export([file/1, file/2, bootstrap/0, make_bootstrap/0, make_extra/0]).
 -export([main/1]).
 
 -define(ALL_COMBINATORS, [p_eof, p_optional, p_not, p_assert, p_seq,
@@ -147,6 +147,14 @@ bootstrap() ->
 -spec make_bootstrap() -> 'ok'.
 make_bootstrap() ->
     ok = bootstrap(),
+    ok = init:stop().
+
+%% @doc Makes the neotoma extras, then exits.
+-spec make_extra() -> 'ok'.
+make_extra() ->
+    ok = file("extra/arithmetic.peg"),
+    ok = file("extra/csv.peg"),
+    ok = file("extra/json.peg"),
     ok = init:stop().
 
 %% @doc Parses arguments passed to escript
